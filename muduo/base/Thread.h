@@ -33,21 +33,21 @@ class Thread : noncopyable
   // pthread_t pthreadId() const { return pthreadId_; }
   pid_t tid() const { return tid_; }
   const string& name() const { return name_; }
-
+//返回本进程创建的线程数目
   static int numCreated() { return numCreated_.get(); }
 
  private:
   void setDefaultName();
 
-  bool       started_;
-  bool       joined_;
-  pthread_t  pthreadId_;
-  pid_t      tid_;
-  ThreadFunc func_;
-  string     name_;
-  CountDownLatch latch_;
+  bool       started_;//线程是否启动
+  bool       joined_;//是否被join回收
+  pthread_t  pthreadId_;//线程ID
+  pid_t      tid_;//进程ID
+  ThreadFunc func_;//线程函数
+  string     name_;//线程名字
+  CountDownLatch latch_;//倒计时计数
 
-  static AtomicInt32 numCreated_;
+  static AtomicInt32 numCreated_;//本进程创建的线程数量
 };
 
 }  // namespace muduo

@@ -50,6 +50,7 @@ TcpConnection::TcpConnection(EventLoop* loop,
     peerAddr_(peerAddr),
     highWaterMark_(64*1024*1024)
 {
+   //设置channel::handleEvent()时的四个回调函数,读/写/关闭/错误
   channel_->setReadCallback(
       std::bind(&TcpConnection::handleRead, this, _1));
   channel_->setWriteCallback(
@@ -60,7 +61,7 @@ TcpConnection::TcpConnection(EventLoop* loop,
       std::bind(&TcpConnection::handleError, this));
   LOG_DEBUG << "TcpConnection::ctor[" <<  name_ << "] at " << this
             << " fd=" << sockfd;
-  socket_->setKeepAlive(true);
+  socket_->setKeepAlive(true); //设置是否开启keepalive判断通信方是否存活
 }
 
 TcpConnection::~TcpConnection()
@@ -71,11 +72,13 @@ TcpConnection::~TcpConnection()
   assert(state_ == kDisconnected);
 }
 
+//内部利用Socket::getTcpInfo()获取tcp信息
 bool TcpConnection::getTcpInfo(struct tcp_info* tcpi) const
 {
   return socket_->getTcpInfo(tcpi);
 }
 
+//内部利用Socket::getTcpInfoString()格式化tcp信息
 string TcpConnection::getTcpInfoString() const
 {
   char buf[1024];
@@ -89,16 +92,19 @@ void TcpConnection::send(const void* data, int len)
   send(StringPiece(static_cast<const char*>(data), len));
 }
 
+//发送数据,内部让eventloop回调tcpconnection::sendInLoop()来实现发送数据
 void TcpConnection::send(const StringPiece& message)
 {
   if (state_ == kConnected)
   {
+    //让eventloop回调tcpconnection::sendInLoop完成发送数据操作
     if (loop_->isInLoopThread())
     {
       sendInLoop(message);
     }
     else
     {
+      //函数指针fp指向sendInLoop;
       void (TcpConnection::*fp)(const StringPiece& message) = &TcpConnection::sendInLoop;
       loop_->runInLoop(
           std::bind(fp,
@@ -190,14 +196,16 @@ void TcpConnection::sendInLoop(const void* data, size_t len)
     }
   }
 }
-
+//关闭tcp连接,并让eventloop回调&TcpConnection::shutdownInLoop()
 void TcpConnection::shutdown()
 {
   // FIXME: use compare and swap
+  //只有已经建立了连接才可以关闭连接
   if (state_ == kConnected)
   {
     setState(kDisconnecting);
     // FIXME: shared_from_this()?
+    //让eventloop回调tcpconnection::shutdownInLoop
     loop_->runInLoop(std::bind(&TcpConnection::shutdownInLoop, this));
   }
 }
@@ -236,16 +244,21 @@ void TcpConnection::shutdownInLoop()
 //                        &TcpConnection::forceCloseInLoop));
 // }
 
+
+//让eventloop强制关闭tcp连接,利用eventloop的定时器队列实现(唤醒poller::poll()来关闭),eventloop
+//回调tcpconnection::forceCloseInLoop()
 void TcpConnection::forceClose()
 {
   // FIXME: use compare and swap
   if (state_ == kConnected || state_ == kDisconnecting)
   {
     setState(kDisconnecting);
+    //让eventloop回调tcpconnection::forceCloseInLoop
     loop_->queueInLoop(std::bind(&TcpConnection::forceCloseInLoop, shared_from_this()));
   }
 }
 
+//强制在seconds秒后关闭tcp连接
 void TcpConnection::forceCloseWithDelay(double seconds)
 {
   if (state_ == kConnected || state_ == kDisconnecting)
@@ -258,6 +271,7 @@ void TcpConnection::forceCloseWithDelay(double seconds)
   }
 }
 
+//供eventloop回调使用,用来强制关闭tcp连接
 void TcpConnection::forceCloseInLoop()
 {
   loop_->assertInLoopThread();
@@ -268,6 +282,7 @@ void TcpConnection::forceCloseInLoop()
   }
 }
 
+//把tcp连接状态转换成字符串形式
 const char* TcpConnection::stateToString() const
 {
   switch (state_)
@@ -285,37 +300,42 @@ const char* TcpConnection::stateToString() const
   }
 }
 
+//sockets::setTcpNoDelay()
 void TcpConnection::setTcpNoDelay(bool on)
 {
   socket_->setTcpNoDelay(on);
 }
 
+//eventloop回调tcpconenction::startReadInLoop()
 void TcpConnection::startRead()
 {
   loop_->runInLoop(std::bind(&TcpConnection::startReadInLoop, this));
 }
 
+//让channel注册读网络事件
 void TcpConnection::startReadInLoop()
 {
   loop_->assertInLoopThread();
   if (!reading_ || !channel_->isReading())
   {
-    channel_->enableReading();
+    channel_->enableReading(); //让m_channel注册读网络事件
     reading_ = true;
   }
 }
 
+//eventloop回调tcpconnection::stopReadInLoop()
 void TcpConnection::stopRead()
 {
   loop_->runInLoop(std::bind(&TcpConnection::stopReadInLoop, this));
 }
 
+//让channel不再关心读网络事件
 void TcpConnection::stopReadInLoop()
 {
   loop_->assertInLoopThread();
   if (reading_ || channel_->isReading())
   {
-    channel_->disableReading();
+    channel_->disableReading(); //让m_channel取关读网络事件
     reading_ = false;
   }
 }
@@ -344,11 +364,14 @@ void TcpConnection::connectDestroyed()
   channel_->remove();
 }
 
+//处理读网络事件,供channel回调,把数据读到 m_inputbuffer中
 void TcpConnection::handleRead(Timestamp receiveTime)
 {
   loop_->assertInLoopThread();
   int savedErrno = 0;
+  //调用sockets::readv()把数据读到m_inputbuffer中
   ssize_t n = inputBuffer_.readFd(channel_->fd(), &savedErrno);
+   //读到了数据调用m_messageCallback()回调函数
   if (n > 0)
   {
     messageCallback_(shared_from_this(), &inputBuffer_, receiveTime);
@@ -365,6 +388,7 @@ void TcpConnection::handleRead(Timestamp receiveTime)
   }
 }
 
+//处理写网络事件,把m_outputbuffer中的数据写到m_channel->fd()上,即发送数据
 void TcpConnection::handleWrite()
 {
   loop_->assertInLoopThread();
@@ -373,9 +397,10 @@ void TcpConnection::handleWrite()
     ssize_t n = sockets::write(channel_->fd(),
                                outputBuffer_.peek(),
                                outputBuffer_.readableBytes());
-    if (n > 0)
+    if (n > 0) //成功写入的字节数
     {
-      outputBuffer_.retrieve(n);
+      outputBuffer_.retrieve(n); //移动写缓冲区的m_writerIndex
+      //写缓冲区中所有数据都发完了,调用写事件完成回调函数
       if (outputBuffer_.readableBytes() == 0)
       {
         channel_->disableWriting();
@@ -405,6 +430,8 @@ void TcpConnection::handleWrite()
   }
 }
 
+//处理关闭连接的网络事件,让channel不再关心任何网络事件.
+//主动调用tcpconnection::forceClose()或者远方断开连接都会触发这个回调
 void TcpConnection::handleClose()
 {
   loop_->assertInLoopThread();
@@ -412,7 +439,7 @@ void TcpConnection::handleClose()
   assert(state_ == kConnected || state_ == kDisconnecting);
   // we don't close fd, leave it to dtor, so we can find leaks easily.
   setState(kDisconnected);
-  channel_->disableAll();
+  channel_->disableAll(); //close所有网络事件
 
   TcpConnectionPtr guardThis(shared_from_this());
   connectionCallback_(guardThis);
@@ -420,6 +447,7 @@ void TcpConnection::handleClose()
   closeCallback_(guardThis);
 }
 
+//处理错误事件,利用sockets::getSocketError()来实现
 void TcpConnection::handleError()
 {
   int err = sockets::getSocketError(channel_->fd());

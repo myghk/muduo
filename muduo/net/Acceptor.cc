@@ -30,9 +30,11 @@ Acceptor::Acceptor(EventLoop* loop, const InetAddress& listenAddr, bool reusepor
     idleFd_(::open("/dev/null", O_RDONLY | O_CLOEXEC))
 {
   assert(idleFd_ >= 0);
+  //设置地址重用,端口重用,绑定Socket和inetaddress
   acceptSocket_.setReuseAddr(true);
   acceptSocket_.setReusePort(reuseport);
   acceptSocket_.bindAddress(listenAddr);
+  //设置读事件回调函数,一旦poller::poll发生读事件,channel就会回调这个handleRead来处理
   acceptChannel_.setReadCallback(
       std::bind(&Acceptor::handleRead, this));
 }
@@ -46,33 +48,39 @@ Acceptor::~Acceptor()
 
 void Acceptor::listen()
 {
+  //保证eventloop所在的线程是当前线程
   loop_->assertInLoopThread();
   listening_ = true;
   acceptSocket_.listen();
+  //channel注册读网络事件,把这个channel更新到poller中的m_pollfds上面
   acceptChannel_.enableReading();
 }
 
+//m_accpetChannel处理读网络事件(连接到来),接受一个连接
 void Acceptor::handleRead()
 {
   loop_->assertInLoopThread();
-  InetAddress peerAddr;
+  InetAddress peerAddr; //连接进来的客户机的套接字地址
   //FIXME loop until no more
+  //客户机套接字:connfd,客户机套接字地址:peeraddr
   int connfd = acceptSocket_.accept(&peerAddr);
-  if (connfd >= 0)
+  if (connfd >= 0) //accept成功
   {
     // string hostport = peerAddr.toIpPort();
     // LOG_TRACE << "Accepts of " << hostport;
+    //回调函数被定义就调用回调函数
     if (newConnectionCallback_)
     {
       newConnectionCallback_(connfd, peerAddr);
     }
     else
     {
-      sockets::close(connfd);
+      sockets::close(connfd); //关闭套接字
     }
   }
-  else
+  else 
   {
+    //accpet失败
     LOG_SYSERR << "in Acceptor::handleRead";
     // Read the section named "The special problem of
     // accept()ing when you can't" in libev's doc.

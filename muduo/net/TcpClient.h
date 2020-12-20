@@ -71,15 +71,19 @@ class TcpClient : noncopyable
   void removeConnection(const TcpConnectionPtr& conn);
 
   EventLoop* loop_;
+  //用于主动发起连接
   ConnectorPtr connector_; // avoid revealing Connector
   const string name_;
+  //连接建立回调函数
   ConnectionCallback connectionCallback_;
+  //消息到来回调函数
   MessageCallback messageCallback_;
+  //数据发送完毕回调函数
   WriteCompleteCallback writeCompleteCallback_;
-  bool retry_;   // atomic
+  bool retry_;   // atomic // 重连，是指连接建立成功之后又断开的时候是否重连
   bool connect_; // atomic
   // always in loop thread
-  int nextConnId_;
+  int nextConnId_; //name_+nextConnId_用于标识一个连接
   mutable MutexLock mutex_;
   TcpConnectionPtr connection_ GUARDED_BY(mutex_);
 };

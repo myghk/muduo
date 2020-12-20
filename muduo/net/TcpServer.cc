@@ -32,6 +32,7 @@ TcpServer::TcpServer(EventLoop* loop,
     messageCallback_(defaultMessageCallback),
     nextConnId_(1)
 {
+  //m_acceptor接受一个新的连接时,回调tcpserver::newConnection
   acceptor_->setNewConnectionCallback(
       std::bind(&TcpServer::newConnection, this, _1, _2));
 }
@@ -55,7 +56,7 @@ void TcpServer::setThreadNum(int numThreads)
   assert(0 <= numThreads);
   threadPool_->setThreadNum(numThreads);
 }
-
+//启动tcpserver,实质上启动内部线程池,并让eventloop回调acceptor::listen(),完成监听操作
 void TcpServer::start()
 {
   if (started_.getAndSet(1) == 0)
@@ -83,17 +84,21 @@ void TcpServer::newConnection(int sockfd, const InetAddress& peerAddr)
   InetAddress localAddr(sockets::getLocalAddr(sockfd));
   // FIXME poll with zero timeout to double confirm the new connection
   // FIXME use make_shared if necessary
+  //新建一个tcp连接,这个操作在线程池内的ioloop线程中执行
   TcpConnectionPtr conn(new TcpConnection(ioLoop,
                                           connName,
                                           sockfd,
                                           localAddr,
                                           peerAddr));
-  connections_[connName] = conn;
+  connections_[connName] = conn; //更新tcpserver内部连接集合
+
+   //设置tcpconnection的四个回调函数
   conn->setConnectionCallback(connectionCallback_);
   conn->setMessageCallback(messageCallback_);
   conn->setWriteCompleteCallback(writeCompleteCallback_);
   conn->setCloseCallback(
       std::bind(&TcpServer::removeConnection, this, _1)); // FIXME: unsafe
+  //让eventloop回调tcpconnection::connectEstablished完成连接建立完成时操作
   ioLoop->runInLoop(std::bind(&TcpConnection::connectEstablished, conn));
 }
 
@@ -108,10 +113,12 @@ void TcpServer::removeConnectionInLoop(const TcpConnectionPtr& conn)
   loop_->assertInLoopThread();
   LOG_INFO << "TcpServer::removeConnectionInLoop [" << name_
            << "] - connection " << conn->name();
+  //在m_connections中移除conn
   size_t n = connections_.erase(conn->name());
   (void)n;
   assert(n == 1);
   EventLoop* ioLoop = conn->getLoop();
+  //让eventloop回调tcpconnection::connectDestroyed完成tcpconenction的销毁
   ioLoop->queueInLoop(
       std::bind(&TcpConnection::connectDestroyed, conn));
 }

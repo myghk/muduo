@@ -22,12 +22,12 @@ namespace muduo
 {
 namespace detail
 {
-
+//得到唯一的线程ID
 pid_t gettid()
 {
   return static_cast<pid_t>(::syscall(SYS_gettid));
 }
-
+//currentthread中以前定义了四个__thread变量,用来描述线程信息,在这里进行设置
 void afterFork()
 {
   muduo::CurrentThread::t_cachedTid = 0;
@@ -35,7 +35,7 @@ void afterFork()
   CurrentThread::tid();
   // no need to call pthread_atfork(NULL, NULL, &afterFork);
 }
-
+//线程初始化函数,负责初始化线程信息
 class ThreadNameInitializer
 {
  public:
@@ -46,16 +46,16 @@ class ThreadNameInitializer
     pthread_atfork(NULL, NULL, &afterFork);
   }
 };
-
+//全局线程初始化对象,完成currentthread中线程全局变量的设置
 ThreadNameInitializer init;
-
+//线程数据类
 struct ThreadData
 {
   typedef muduo::Thread::ThreadFunc ThreadFunc;
-  ThreadFunc func_;
-  string name_;
-  pid_t* tid_;
-  CountDownLatch* latch_;
+  ThreadFunc func_;       //线程函数
+  string name_;           //线程名字
+  pid_t* tid_;            //线程ID
+  CountDownLatch* latch_; //倒计时计数
 
   ThreadData(ThreadFunc func,
              const string& name,
@@ -66,9 +66,10 @@ struct ThreadData
       tid_(tid),
       latch_(latch)
   { }
-
+ //运行线程
   void runInThread()
   {
+    //设置类成员变量
     *tid_ = muduo::CurrentThread::tid();
     tid_ = NULL;
     latch_->countDown();
@@ -78,8 +79,8 @@ struct ThreadData
     ::prctl(PR_SET_NAME, muduo::CurrentThread::t_threadName);
     try
     {
-      func_();
-      muduo::CurrentThread::t_threadName = "finished";
+      func_();//具体的运行函数
+      muduo::CurrentThread::t_threadName = "finished";//执行结束
     }
     catch (const Exception& ex)
     {
@@ -104,7 +105,7 @@ struct ThreadData
     }
   }
 };
-
+//从属于detail命名空间,使用ThreadData类创建并且启动线程
 void* startThread(void* obj)
 {
   ThreadData* data = static_cast<ThreadData*>(obj);
@@ -114,27 +115,28 @@ void* startThread(void* obj)
 }
 
 }  // namespace detail
-
+//之前currentthread中没有定义此方法,因此在这里进行定义
 void CurrentThread::cacheTid()
 {
+  //设置 __thread修饰的 currentthread::线程ID,线程名字长度
   if (t_cachedTid == 0)
   {
     t_cachedTid = detail::gettid();
     t_tidStringLength = snprintf(t_tidString, sizeof t_tidString, "%5d ", t_cachedTid);
   }
 }
-
+//判断是否是主线程,进程ID是否是线程ID
 bool CurrentThread::isMainThread()
 {
   return tid() == ::getpid();
 }
-
+//线程挂起一段时间
 void CurrentThread::sleepUsec(int64_t usec)
 {
   struct timespec ts = { 0, 0 };
   ts.tv_sec = static_cast<time_t>(usec / Timestamp::kMicroSecondsPerSecond);
   ts.tv_nsec = static_cast<long>(usec % Timestamp::kMicroSecondsPerSecond * 1000);
-  ::nanosleep(&ts, NULL);
+  ::nanosleep(&ts, NULL);//挂起当前线程
 }
 
 AtomicInt32 Thread::numCreated_;
@@ -150,7 +152,7 @@ Thread::Thread(ThreadFunc func, const string& n)
 {
   setDefaultName();
 }
-
+//析构时把线程detach,不用父进程回收子线程
 Thread::~Thread()
 {
   if (started_ && !joined_)
@@ -161,6 +163,7 @@ Thread::~Thread()
 
 void Thread::setDefaultName()
 {
+  //当前进程的线程数目++
   int num = numCreated_.incrementAndGet();
   if (name_.empty())
   {
@@ -178,17 +181,19 @@ void Thread::start()
   detail::ThreadData* data = new detail::ThreadData(func_, name_, &tid_, &latch_);
   if (pthread_create(&pthreadId_, NULL, &detail::startThread, data))
   {
+    //线程创建失败
     started_ = false;
     delete data; // or no delete?
     LOG_SYSFATAL << "Failed in pthread_create";
   }
   else
   {
+    //线程创建成功
     latch_.wait();
     assert(tid_ > 0);
   }
 }
-
+//回收子线程
 int Thread::join()
 {
   assert(started_);

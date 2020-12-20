@@ -45,13 +45,16 @@ class TcpConnection : noncopyable,
   /// Constructs a TcpConnection with a connected sockfd
   ///
   /// User should not create this object.
+  //构造函数,初始化成员,设置四个回调函数,Read,Write,Close,ErrorCallback
   TcpConnection(EventLoop* loop,
                 const string& name,
                 int sockfd,
                 const InetAddress& localAddr,
                 const InetAddress& peerAddr);
+  //析构函数,打印一下日志啥也不干
   ~TcpConnection();
 
+  //获取成员信息:eventloop,name,server/client地址,连接是否建立
   EventLoop* getLoop() const { return loop_; }
   const string& name() const { return name_; }
   const InetAddress& localAddress() const { return localAddr_; }
@@ -59,7 +62,9 @@ class TcpConnection : noncopyable,
   bool connected() const { return state_ == kConnected; }
   bool disconnected() const { return state_ == kDisconnected; }
   // return true if success.
+  //内部利用Socket::getTcpInfo()获取tcp信息
   bool getTcpInfo(struct tcp_info*) const;
+  //内部利用Socket::getTcpInfoString()格式化tcp信息
   string getTcpInfoString() const;
 
   // void send(string&& message); // C++11
@@ -67,6 +72,7 @@ class TcpConnection : noncopyable,
   void send(const StringPiece& message);
   // void send(Buffer&& message); // C++11
   void send(Buffer* message);  // this one will swap data
+  //关闭tcp连接,并让eventloop回调&TcpConnection::shutdownInLoop()
   void shutdown(); // NOT thread safe, no simultaneous calling
   // void shutdownAndForceCloseAfter(double seconds); // NOT thread safe, no simultaneous calling
   void forceClose();
@@ -131,22 +137,24 @@ class TcpConnection : noncopyable,
   void startReadInLoop();
   void stopReadInLoop();
 
-  EventLoop* loop_;
+  EventLoop* loop_;//所在的eventloop
   const string name_;
-  StateE state_;  // FIXME: use atomic variable
-  bool reading_;
+  StateE state_;  // FIXME: use atomic variable //连接状态,有上面四种
+  bool reading_; //是否正在读
   // we don't expose those classes to client.
-  std::unique_ptr<Socket> socket_;
-  std::unique_ptr<Channel> channel_;
-  const InetAddress localAddr_;
-  const InetAddress peerAddr_;
-  ConnectionCallback connectionCallback_;
-  MessageCallback messageCallback_;
-  WriteCompleteCallback writeCompleteCallback_;
+  std::unique_ptr<Socket> socket_; //server Socket*
+  std::unique_ptr<Channel> channel_; //socket对应的channel
+  const InetAddress localAddr_;  //server地址
+  const InetAddress peerAddr_; //client地址
+  ConnectionCallback connectionCallback_; //连接成功的回调函数
+  MessageCallback messageCallback_; //读事件成功的回调函数
+  WriteCompleteCallback writeCompleteCallback_; //写事件完成的回调函数
   HighWaterMarkCallback highWaterMarkCallback_;
-  CloseCallback closeCallback_;
+  CloseCallback closeCallback_; //连接关闭时的回调函数
   size_t highWaterMark_;
+  //TCP读缓冲区
   Buffer inputBuffer_;
+  //TCP写缓冲区
   Buffer outputBuffer_; // FIXME: use list<Buffer> as output buffer.
   boost::any context_;
   // FIXME: creationTime_, lastReceiveTime_
